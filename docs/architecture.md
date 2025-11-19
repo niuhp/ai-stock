@@ -1,4 +1,4 @@
-# AI Stock 系统架构设计文档
+# AI Stock - ETF量化交易系统架构设计文档
 
 ## 1. 架构总览
 
@@ -7,15 +7,15 @@
 ```
 ┌──────────────────────────────────────────────────────────────────┐
 │                          客户端层 (Client Layer)                  │
-│  ┌────────────┐  ┌────────────┐  ┌────────────┐  ┌────────────┐ │
-│  │   Web端    │  │   移动端    │  │   小程序    │  │  开放API   │ │
-│  └────────────┘  └────────────┘  └────────────┘  └────────────┘ │
+│  ┌────────────┐  ┌────────────┐  ┌────────────┐                 │
+│  │   Web端    │  │   移动端    │  │  API接口   │                 │
+│  └────────────┘  └────────────┘  └────────────┘                 │
 └──────────────────────────────────────────────────────────────────┘
                                 ↓
 ┌──────────────────────────────────────────────────────────────────┐
 │                        接入层 (Gateway Layer)                     │
 │  ┌──────────────────────────────────────────────────────────┐   │
-│  │             Spring Cloud Gateway / Nginx                  │   │
+│  │             Spring Cloud Gateway                          │   │
 │  │  • 身份认证  • 限流熔断  • 路由转发  • 日志记录          │   │
 │  └──────────────────────────────────────────────────────────┘   │
 └──────────────────────────────────────────────────────────────────┘
@@ -23,25 +23,28 @@
 ┌──────────────────────────────────────────────────────────────────┐
 │                       业务服务层 (Service Layer)                  │
 │  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐            │
-│  │用户服务 │  │数据服务 │  │分析服务 │  │推荐服务 │            │
+│  │用户服务 │  │数据服务 │  │策略服务 │  │回测服务 │            │
 │  └─────────┘  └─────────┘  └─────────┘  └─────────┘            │
 │  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐            │
-│  │组合服务 │  │监控服务 │  │通知服务 │  │报告服务 │            │
+│  │交易服务 │  │监控服务 │  │通知服务 │  │报告服务 │            │
 │  └─────────┘  └─────────┘  └─────────┘  └─────────┘            │
 └──────────────────────────────────────────────────────────────────┘
                                 ↓
 ┌──────────────────────────────────────────────────────────────────┐
-│                       数据&AI层 (Data & AI Layer)                │
+│                       量化引擎层 (Quant Engine Layer)             │
 │  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐            │
-│  │数据采集 │  │数据清洗 │  │特征工程 │  │AI引擎   │            │
+│  │数据采集 │  │策略引擎 │  │回测引擎 │  │信号引擎 │            │
+│  └─────────┘  └─────────┘  └─────────┘  └─────────┘            │
+│  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐            │
+│  │风控引擎 │  │绩效计算 │  │指标计算 │  │优化引擎 │            │
 │  └─────────┘  └─────────┘  └─────────┘  └─────────┘            │
 └──────────────────────────────────────────────────────────────────┘
                                 ↓
 ┌──────────────────────────────────────────────────────────────────┐
 │                   基础设施层 (Infrastructure Layer)               │
-│  ┌────────┐ ┌──────┐ ┌────┐ ┌────┐ ┌────┐ ┌────────────┐       │
-│  │ MySQL  │ │Redis │ │ MQ │ │ ES │ │OSS │ │监控&告警   │       │
-│  └────────┘ └──────┘ └────┘ └────┘ └────┘ └────────────┘       │
+│  ┌────────┐ ┌──────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐    │
+│  │ MySQL  │ │Redis │ │ RabbitMQ │ │ InfluxDB │ │监控&告警 │    │
+│  └────────┘ └──────┘ └──────────┘ └──────────┘ └──────────┘    │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
@@ -53,7 +56,7 @@
 - 用户注册、登录、认证
 - 用户信息管理
 - 权限与角色管理
-- 会员体系管理
+- 账户管理
 
 **技术栈**：
 - Spring Boot 3.x
@@ -63,7 +66,7 @@
 
 **数据库表**：
 - tb_user
-- tb_user_preference
+- tb_account
 - tb_role
 - tb_permission
 
@@ -73,13 +76,14 @@ POST   /api/v1/users/register        # 用户注册
 POST   /api/v1/users/login           # 用户登录
 GET    /api/v1/users/profile         # 获取用户信息
 PUT    /api/v1/users/profile         # 更新用户信息
-PUT    /api/v1/users/preference      # 更新用户偏好
+GET    /api/v1/accounts              # 账户列表
+POST   /api/v1/accounts              # 创建账户
 ```
 
 ### 2.2 数据服务 (ai-stock-data)
 
 **职责**：
-- 股票数据采集（爬虫、API）
+- ETF数据采集（API接口）
 - 数据清洗与存储
 - 数据查询接口
 - 数据更新调度
@@ -92,170 +96,153 @@ PUT    /api/v1/users/preference      # 更新用户偏好
 - Caffeine（本地缓存）
 
 **数据源**：
-- 东方财富API
-- 新浪财经API
-- Tushare Pro
-- 同花顺API（备用）
+- AKShare（主要）
+- Tushare Pro（备用）
+- 东方财富API（备用）
 
 **数据库表**：
-- tb_stock_info
-- tb_stock_kline_*
-- tb_stock_realtime
-- tb_stock_financial
-- tb_market_index
+- tb_etf_info
+- tb_etf_kline (InfluxDB)
+- tb_etf_realtime (Redis)
+- tb_etf_nav
 
 **对外接口**：
 ```
-GET    /api/v1/stocks                # 股票列表
-GET    /api/v1/stocks/{code}         # 股票详情
-GET    /api/v1/stocks/{code}/kline   # K线数据
-GET    /api/v1/stocks/{code}/realtime # 实时行情
-GET    /api/v1/stocks/{code}/financial # 财务数据
+GET    /api/v1/etfs                  # ETF列表
+GET    /api/v1/etfs/{code}           # ETF详情
+GET    /api/v1/etfs/{code}/kline     # K线数据
+GET    /api/v1/etfs/{code}/realtime  # 实时行情
+GET    /api/v1/etfs/{code}/nav       # 净值数据
 ```
 
-### 2.3 分析服务 (ai-stock-analysis)
+### 2.3 策略服务 (ai-stock-strategy)
 
 **职责**：
-- 技术指标计算
-- 技术分析
-- 基本面分析
-- 资金面分析
-- 情绪分析
+- 策略管理（CRUD）
+- 策略执行调度
+- 信号生成
+- 策略监控
 
 **技术栈**：
 - Spring Boot 3.x
-- Ta-Lib（技术指标库）
-- Redis（缓存计算结果）
-- RabbitMQ（异步任务）
-
-**核心算法**：
-```java
-// 技术指标计算
-- MACD (指数平滑异同移动平均线)
-- KDJ (随机指标)
-- RSI (相对强弱指标)
-- BOLL (布林带)
-- MA (移动平均线)
-- EMA (指数移动平均线)
-- 成交量分析
-- 均线系统分析
-
-// 形态识别
-- 头肩顶/头肩底
-- 双顶/双底
-- 三角形整理
-- 旗形整理
-- 趋势线突破
-```
-
-**对外接口**：
-```
-GET    /api/v1/analysis/{code}/technical    # 技术分析
-GET    /api/v1/analysis/{code}/fundamental  # 基本面分析
-GET    /api/v1/analysis/{code}/capital      # 资金面分析
-GET    /api/v1/analysis/{code}/sentiment    # 情绪分析
-POST   /api/v1/analysis/batch               # 批量分析
-```
-
-### 2.4 AI推荐服务 (ai-stock-recommendation)
-
-**职责**：
-- AI模型调用
-- 买卖点推荐
-- 个性化推荐
-- 推荐效果评估
-
-**技术栈**：
-- Spring Boot 3.x
-- Python AI服务（Flask/FastAPI）
+- Python策略引擎（Backtrader）
 - gRPC（Java与Python通信）
-- Redis（推荐结果缓存）
+- Redis（信号缓存）
+- RabbitMQ（信号推送）
 
-**AI模型架构**：
-```
-输入层（特征）：
-  - 技术指标（30+维度）
-  - 基本面指标（20+维度）
-  - 资金流向指标（10+维度）
-  - 情绪指标（5+维度）
-  - 市场环境指标（10+维度）
+**内置策略**：
+```python
+# 技术指标策略
+- 双均线策略（MA Cross）
+- MACD策略
+- RSI策略
+- 布林带策略
+- KDJ策略
 
-隐藏层：
-  - LSTM层（处理时序特征）
-  - 全连接层（多层）
-  - Dropout层（防止过拟合）
+# 趋势跟踪策略
+- 动量策略
+- 突破策略
+- 通道策略
 
-输出层：
-  - 涨跌预测（分类）
-  - 价格预测（回归）
-  - 置信度评估
-```
-
-**评分模型**：
-```
-总分 = 技术面得分 × 0.35 
-     + 基本面得分 × 0.30 
-     + 资金面得分 × 0.20 
-     + 情绪面得分 × 0.15
-
-推荐级别：
-  - 总分 ≥ 85: 强烈推荐
-  - 75 ≤ 总分 < 85: 推荐
-  - 65 ≤ 总分 < 75: 观察
-  - 总分 < 65: 不推荐
+# 均值回归策略
+- 配对交易
+- 统计套利
 ```
 
 **对外接口**：
 ```
-GET    /api/v1/recommendations/buy          # 买入推荐
-GET    /api/v1/recommendations/sell         # 卖出推荐
-GET    /api/v1/recommendations/personalized # 个性化推荐
-GET    /api/v1/recommendations/{id}         # 推荐详情
-GET    /api/v1/recommendations/history      # 历史推荐
+GET    /api/v1/strategies              # 策略列表
+POST   /api/v1/strategies              # 创建策略
+GET    /api/v1/strategies/{id}         # 策略详情
+PUT    /api/v1/strategies/{id}         # 更新策略
+DELETE /api/v1/strategies/{id}         # 删除策略
+POST   /api/v1/strategies/{id}/start   # 启动策略
+POST   /api/v1/strategies/{id}/stop    # 停止策略
 ```
 
-### 2.5 组合管理服务 (ai-stock-portfolio)
+### 2.4 回测服务 (ai-stock-backtest)
 
 **职责**：
-- 投资组合管理
-- 收益计算
-- 风险评估
-- 组合优化建议
+- 回测任务管理
+- 回测引擎执行
+- 回测报告生成
+- 参数优化
+
+**技术栈**：
+- Spring Boot 3.x
+- Python回测引擎（Backtrader）
+- gRPC通信
+- MySQL（回测记录）
+
+**回测指标**：
+```
+收益指标：
+  - 总收益率
+  - 年化收益率
+  - 月度收益率
+
+风险指标：
+  - 最大回撤
+  - 波动率
+  - 夏普比率
+  - 索提诺比率
+  - Calmar比率
+
+交易统计：
+  - 交易次数
+  - 胜率
+  - 盈亏比
+  - 平均持仓时间
+```
+
+**对外接口**：
+```
+POST   /api/v1/backtests               # 创建回测任务
+GET    /api/v1/backtests                # 回测列表
+GET    /api/v1/backtests/{id}           # 回测详情
+GET    /api/v1/backtests/{id}/report    # 回测报告
+POST   /api/v1/backtests/{id}/optimize  # 参数优化
+```
+
+### 2.5 交易服务 (ai-stock-trade)
+
+**职责**：
+- 账户管理
+- 持仓管理
+- 交易记录
+- 绩效分析
 
 **技术栈**：
 - Spring Boot 3.x
 - MyBatis Plus
-- Redis（组合数据缓存）
+- Redis（持仓缓存）
 
-**核心算法**：
+**核心功能**：
 ```
-收益率计算：
-  - 单只股票收益率 = (当前价 - 买入价) / 买入价
-  - 组合收益率 = Σ(持仓比例 × 股票收益率)
-  - 年化收益率 = (1 + 总收益率)^(365/持有天数) - 1
+账户管理：
+  - 多账户支持
+  - 资金管理
+  - 权益计算
 
-风险指标：
-  - 最大回撤 = (峰值 - 谷值) / 峰值
-  - 波动率 = 收益率标准差 × √252
-  - 夏普比率 = (年化收益率 - 无风险利率) / 波动率
-  - Beta系数 = Cov(组合收益, 市场收益) / Var(市场收益)
+持仓管理：
+  - 持仓查询
+  - 成本计算
+  - 盈亏计算
 
-组合优化：
-  - 马科维茨投资组合理论
-  - 等权重配置
-  - 风险平价配置
-  - 行业分散化建议
+绩效分析：
+  - 收益分析
+  - 风险指标
+  - 归因分析
+  - 基准对比
 ```
 
 **对外接口**：
 ```
-POST   /api/v1/portfolios                   # 创建组合
-GET    /api/v1/portfolios                   # 组合列表
-GET    /api/v1/portfolios/{id}              # 组合详情
-POST   /api/v1/portfolios/{id}/positions    # 添加持仓
-DELETE /api/v1/portfolios/{id}/positions/{posId} # 删除持仓
-GET    /api/v1/portfolios/{id}/analysis     # 组合分析
-GET    /api/v1/portfolios/{id}/optimize     # 组合优化建议
+GET    /api/v1/accounts/{id}            # 账户详情
+GET    /api/v1/accounts/{id}/positions  # 持仓列表
+GET    /api/v1/accounts/{id}/trades     # 交易记录
+GET    /api/v1/accounts/{id}/performance # 绩效分析
+POST   /api/v1/trades                   # 记录交易
 ```
 
 ### 2.6 监控预警服务 (ai-stock-monitor)
