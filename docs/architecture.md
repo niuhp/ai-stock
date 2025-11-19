@@ -1,4 +1,14 @@
-# AI Stock - ETF量化交易系统架构设计文档
+# AI Stock - A股量化交易系统架构设计文档
+
+## 设计理念
+
+**📌 通用架构，分期实现**
+- 🏗️ 架构设计支持股票、ETF、期权等多种标的
+- 🎯 一期专注ETF实现，验证架构可行性
+- 🚀 二期平滑扩展到个股，无需重构
+- 🔧 模块化设计，易于维护和扩展
+
+---
 
 ## 1. 架构总览
 
@@ -83,9 +93,9 @@ POST   /api/v1/accounts              # 创建账户
 ### 2.2 数据服务 (ai-stock-data)
 
 **职责**：
-- ETF数据采集（API接口）
+- 金融标的数据采集（通用接口）
 - 数据清洗与存储
-- 数据查询接口
+- 统一数据查询接口
 - 数据更新调度
 
 **技术栈**：
@@ -100,27 +110,40 @@ POST   /api/v1/accounts              # 创建账户
 - Tushare Pro（备用）
 - 东方财富API（备用）
 
-**数据库表**：
-- tb_etf_info
-- tb_etf_kline (InfluxDB)
-- tb_etf_realtime (Redis)
-- tb_etf_nav
+**数据库表（通用设计）**：
+- tb_instrument_info（金融工具表，支持ETF/STOCK/OPTION）
+- kline_data (InfluxDB，支持多标的类型)
+- realtime:{type}:{code} (Redis)
 
-**对外接口**：
+**对外接口（通用API）**：
 ```
-GET    /api/v1/etfs                  # ETF列表
-GET    /api/v1/etfs/{code}           # ETF详情
-GET    /api/v1/etfs/{code}/kline     # K线数据
-GET    /api/v1/etfs/{code}/realtime  # 实时行情
-GET    /api/v1/etfs/{code}/nav       # 净值数据
+# 通用查询接口
+GET    /api/v1/instruments?type=ETF               # 标的列表（按类型过滤）
+GET    /api/v1/instruments/{code}                 # 标的详情
+GET    /api/v1/instruments/{code}/kline           # K线数据
+GET    /api/v1/instruments/{code}/realtime        # 实时行情
+
+# 一期ETF接口（向后兼容）
+GET    /api/v1/etfs                               # ETF列表
+GET    /api/v1/etfs/{code}                        # ETF详情
+GET    /api/v1/etfs/{code}/nav                    # 净值数据
+
+# 二期股票接口（预留）
+GET    /api/v1/stocks                             # 股票列表
+GET    /api/v1/stocks/{code}/financial            # 财务数据
 ```
+
+**扩展性设计**：
+- 数据采集器接口化，支持插件式扩展
+- 数据模型使用`instrument`统一命名
+- 策略引擎与标的类型解耦
 
 ### 2.3 策略服务 (ai-stock-strategy)
 
 **职责**：
 - 策略管理（CRUD）
 - 策略执行调度
-- 信号生成
+- 信号生成（标的类型无关）
 - 策略监控
 
 **技术栈**：
@@ -130,23 +153,29 @@ GET    /api/v1/etfs/{code}/nav       # 净值数据
 - Redis（信号缓存）
 - RabbitMQ（信号推送）
 
-**内置策略**：
+**内置策略（通用，支持多标的）**：
 ```python
-# 技术指标策略
-- 双均线策略（MA Cross）
-- MACD策略
-- RSI策略
-- 布林带策略
-- KDJ策略
+# 技术指标策略（标的类型无关）
+- 双均线策略（MA Cross）          # 支持: ETF, STOCK
+- MACD策略                        # 支持: ETF, STOCK
+- RSI策略                         # 支持: ETF, STOCK
+- 布林带策略                       # 支持: ETF, STOCK
+- KDJ策略                         # 支持: ETF, STOCK
 
 # 趋势跟踪策略
-- 动量策略
-- 突破策略
-- 通道策略
+- 动量策略                         # 支持: ETF, STOCK
+- 突破策略                         # 支持: ETF, STOCK
+- 通道策略                         # 支持: ETF, STOCK
 
 # 均值回归策略
-- 配对交易
+- 配对交易（一期ETF，二期扩展股票对）
 - 统计套利
+- ETF折溢价套利（一期ETF专属）
+
+# 多因子策略（二期个股）
+- 价值因子策略
+- 成长因子策略
+- 质量因子策略
 ```
 
 **对外接口**：
@@ -158,7 +187,13 @@ PUT    /api/v1/strategies/{id}         # 更新策略
 DELETE /api/v1/strategies/{id}         # 删除策略
 POST   /api/v1/strategies/{id}/start   # 启动策略
 POST   /api/v1/strategies/{id}/stop    # 停止策略
+GET    /api/v1/strategies/templates    # 策略模板（按标的类型过滤）
 ```
+
+**扩展性设计**：
+- 策略基类设计为标的类型无关
+- 策略参数支持配置支持的标的类型
+- 策略运行时自动适配标的类型
 
 ### 2.4 回测服务 (ai-stock-backtest)
 
